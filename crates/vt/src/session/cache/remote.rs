@@ -25,7 +25,7 @@ use tokio::sync::mpsc;
 use tokio_util::{sync::CancellationToken, task::TaskTracker};
 use vt_path::AbsolutePath;
 use vt_plan::cache_metadata::ExecutionCacheKey;
-use vt_remote_cache::{Client, Download, Fetched};
+use vt_remote_cache::{Client, Download, Fetched, auth::Anonymous};
 use vt_str::Str;
 use wincode::{
     SchemaWrite,
@@ -142,7 +142,7 @@ impl RemoteClients {
         if let Some(client) = clients.get(endpoint) {
             return Ok(Arc::clone(client));
         }
-        let client = Arc::new(Client::new(endpoint)?);
+        let client = Arc::new(Client::new(endpoint, Arc::new(Anonymous))?);
         clients.insert(Arc::clone(endpoint), Arc::clone(&client));
         drop(clients);
         Ok(client)
