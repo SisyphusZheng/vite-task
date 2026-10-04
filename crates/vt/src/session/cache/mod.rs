@@ -355,16 +355,18 @@ impl ExecutionCache {
             clippy::manual_let_else,
             reason = "naming every access mode makes adding one a compile error here"
         )]
-        let url = match &cache_metadata.remote_cache {
-            Some(ResolvedRemoteCacheConfig {
-                access: RemoteCacheAccess::Read | RemoteCacheAccess::ReadWrite,
-                url,
-            }) => url,
+        let remote = match &cache_metadata.remote_cache {
+            Some(
+                remote @ ResolvedRemoteCacheConfig {
+                    access: RemoteCacheAccess::Read | RemoteCacheAccess::ReadWrite,
+                    ..
+                },
+            ) => remote,
             None => return Ok(Err(local_miss)),
         };
         let remote_miss = match self
             .try_hit_remote(
-                url,
+                remote,
                 cache_metadata,
                 &cache_key,
                 globbed_inputs,
@@ -421,7 +423,7 @@ impl ExecutionCache {
         Ok(Err(CacheMiss::NotFound))
     }
 
-    /// Fetch the entry from the remote cache at `endpoint`. An exact entry
+    /// Fetch the entry from the remote cache `remote`. An exact entry
     /// that passes validation is a hit once its output archive is downloaded.
     /// A fallback entry, a failed validation, or a failed read is a miss. An
     /// error while validating counts as a failed read, so the remote entry
@@ -429,7 +431,7 @@ impl ExecutionCache {
     #[expect(clippy::too_many_arguments, reason = "forwarded from `try_hit`")]
     async fn try_hit_remote(
         &self,
-        endpoint: &Arc<str>,
+        remote: &ResolvedRemoteCacheConfig,
         cache_metadata: &CacheMetadata,
         cache_key: &CacheEntryKey,
         globbed_inputs: &BTreeMap<RelativePathBuf, u64>,
@@ -439,7 +441,7 @@ impl ExecutionCache {
     ) -> anyhow::Result<Result<CacheEntryValue, CacheMiss>> {
         let fetched = self
             .remote_clients
-            .fetch(endpoint, cache_key, &cache_metadata.execution_cache_key, cancel_token)
+            .fetch(remote, cache_key, &cache_metadata.execution_cache_key, cancel_token)
             .await;
         let validate = |cache_value: &CacheEntryValue| {
             cache_value.validate(&cache_metadata.unfiltered_envs, globbed_inputs, workspace_root)
@@ -454,7 +456,7 @@ impl ExecutionCache {
             Some(blob_id) => {
                 match self
                     .remote_clients
-                    .download_archive(endpoint, &blob_id, cache_dir, cancel_token)
+                    .download_archive(remote, &blob_id, cache_dir, cancel_token)
                     .await
                 {
                     Ok(archive_name) => Some(archive_name),
@@ -517,14 +519,16 @@ impl ExecutionCache {
         self.record(&cache_key, execution_cache_key, &cache_value, cache_dir).await?;
 
         let upload_error = Arc::new(OnceLock::new());
-        let url = match &cache_metadata.remote_cache {
-            Some(ResolvedRemoteCacheConfig { access: RemoteCacheAccess::ReadWrite, url }) => url,
+        let remote = match &cache_metadata.remote_cache {
+            Some(
+                remote @ ResolvedRemoteCacheConfig { access: RemoteCacheAccess::ReadWrite, .. },
+            ) => remote,
             Some(ResolvedRemoteCacheConfig { access: RemoteCacheAccess::Read, .. }) | None => {
                 return Ok(upload_error);
             }
         };
         match self.remote_clients.prepare_upload(
-            url,
+            remote,
             &cache_key,
             execution_cache_key,
             &cache_value,
